@@ -1,0 +1,261 @@
+#!/bin/bash
+###edit by Manson
+# 輸入站點 上下級
+echo "請輸入站點："
+read site
+echo "請輸入上級："
+read account1
+echo "请输入下级（多個帳號以空格分隔）：" 
+read -a account2
+
+account2_batch=$(printf "'%s'," "${account2[@]}")
+account2_batch=${account2_batch%,} 
+
+# 套入字串
+sql="
+--确认有所有上下级账号
+SELECT s.ID, a.ID, a.LOGIN_NAME, a.ACCOUNT_NAME_PATH, a.ACCOUNT_ID_PATH, a.CREATE_TIME, s.CREATE_DATE
+FROM AUTH_ACCOUNT a
+LEFT JOIN PUB_SITE s ON a.PLATFORM_ID = s.ID
+WHERE s.SITE_PATH = '$site' AND LOGIN_NAME IN (
+'$account1',$account2_batch
+)
+;
+--如果有资料时须告知技术客服下级返点超过上级，请技术客服通知客户调整
+WITH d AS (
+	SELECT ID, LOGIN_NAME, PLATFORM_ID FROM LG.AUTH_ACCOUNT
+	WHERE PLATFORM_ID = (SELECT ID FROM LG.PUB_SITE WHERE SITE_PATH = '$site') AND LOGIN_NAME = '$account1' --上级账号
+)
+SELECT
+	DECODE(a.\"TYPE\", 1, '福利彩票', 2, '体育彩票', 5, '六合彩', 9, '时时彩', 10, '快三', 11, '11选5', 12, '快乐彩', 13, '赛车', 14, 'QQ彩', 15, '棋牌', 16, '百家樂', 17, '对战') \"采种\"
+	, c.ACCOUNT_NAME_PATH \"层级\", c.LOGIN_NAME \"用户帐号\", a.REBATE \"返点\", a.LOWER_REBATE \"下级返点上限\", d.LOGIN_NAME \"上级帐号\", b.REBATE \"上级返点\", b.LOWER_REBATE \"上级的下级返点上限\"
+FROM LG.AUTH_AGENT_REBATE a
+LEFT JOIN d ON d.PLATFORM_ID = a.SITE_ID
+LEFT JOIN LG.AUTH_AGENT_REBATE b ON a.SITE_ID = b.SITE_ID AND a.\"TYPE\" = b.\"TYPE\" AND b.ACCOUNT_ID = d.ID --上级账号ID
+LEFT JOIN LG.AUTH_ACCOUNT c ON a.ACCOUNT_ID = c.ID
+WHERE 1=1
+	AND a.SITE_ID = d.PLATFORM_ID
+	AND a.AGENT_PATH IN (
+		SELECT DISTINCT ACCOUNT_ID_PATH FROM LG.AUTH_ACCOUNT WHERE PLATFORM_ID = (SELECT ID FROM LG.PUB_SITE WHERE SITE_PATH = '$site')
+		CONNECT BY PARENT_ID = PRIOR ID START WITH LOGIN_NAME IN (
+			$account2_batch
+		)
+	) --直属下级账号
+	AND (a.REBATE > b.REBATE OR a.REBATE > NVL(NVL(b.LOWER_REBATE, b.REBATE), 9))
+ORDER BY c.ACCOUNT_NAME_PATH, a.\"TYPE\";
+
+--指定站点更新
+BEGIN
+	FOR i IN (
+		WITH c AS (
+			SELECT 
+				a.PLATFORM_ID, a.ID, a.LOGIN_NAME, a.\"LEVEL\", b.NEW_LEVEL, a.ACCOUNT_ID_PATH, a.ACCOUNT_NAME_PATH, a.PARENT_ID, a.PARENT_NAME,
+				CASE b.NEW_LEVEL
+					WHEN 0 THEN to_number(NULL)
+					WHEN 1 THEN to_number(SUBSTR(a.ACCOUNT_ID_PATH, 1, INSTR(ACCOUNT_ID_PATH, '/', 1, b.NEW_LEVEL) -1))
+					ELSE to_number(SUBSTR(a.ACCOUNT_ID_PATH, INSTR(ACCOUNT_ID_PATH, '/', 1, b.NEW_LEVEL-1) +1, INSTR(ACCOUNT_ID_PATH, '/', 1, b.NEW_LEVEL) - INSTR(ACCOUNT_ID_PATH, '/', 1, b.NEW_LEVEL-1) -1))
+				END AS NEW_PARENT_ID,
+				CASE b.NEW_LEVEL
+					WHEN 0 THEN '厅主'
+					WHEN 1 THEN SUBSTR(a.ACCOUNT_NAME_PATH, 1, INSTR(ACCOUNT_NAME_PATH, '/', 1, b.NEW_LEVEL) -1)
+					ELSE SUBSTR(a.ACCOUNT_NAME_PATH, INSTR(ACCOUNT_NAME_PATH, '/', 1, b.NEW_LEVEL-1) +1, INSTR(ACCOUNT_NAME_PATH, '/', 1, b.NEW_LEVEL) - INSTR(ACCOUNT_NAME_PATH, '/', 1, b.NEW_LEVEL-1) -1)
+				END AS NEW_PARENT_NAME
+			FROM LG.AUTH_ACCOUNT a 
+			LEFT JOIN (
+				SELECT ID, REGEXP_COUNT(ACCOUNT_NAME_PATH , '/') -1 AS NEW_LEVEL FROM LG.AUTH_ACCOUNT 
+				WHERE 1=1 AND PLATFORM_ID = (SELECT ID FROM LG.PUB_SITE WHERE SITE_PATH = '$site')
+			) b ON b.ID = a.ID
+			WHERE 1=1 AND PLATFORM_ID = (SELECT ID FROM LG.PUB_SITE WHERE SITE_PATH = '$site')
+		)
+		SELECT a.PLATFORM_ID, a.ID, a.LOGIN_NAME, b.NEW_LEVEL, b.NEW_SUBORDINATES, c.NEW_PARENT_ID, c.NEW_PARENT_NAME
+		FROM LG.AUTH_ACCOUNT a
+		LEFT JOIN(
+			SELECT a.ID, a.LOGIN_NAME, c.NEW_LEVEL, count(1) -1 AS NEW_SUBORDINATES FROM c
+			LEFT JOIN LG.AUTH_ACCOUNT a ON a.ID = c.ID
+			CONNECT BY c.ID = PRIOR c.NEW_PARENT_ID START WITH c.ID = a.ID --特殊处理，与一般上下级关联不同
+			GROUP BY a.ID, a.LOGIN_NAME, c.NEW_LEVEL
+		) b ON b.ID = a.ID 
+		LEFT JOIN c ON c.ID = a.ID
+		WHERE 1=1
+			AND a.PLATFORM_ID = (SELECT ID FROM LG.PUB_SITE WHERE SITE_PATH = '$site')
+			AND (a.\"LEVEL\" != b.NEW_LEVEL OR a.SUBORDINATES != b.NEW_SUBORDINATES OR a.PARENT_ID != c.NEW_PARENT_ID OR a.PARENT_NAME != c.NEW_PARENT_NAME)
+	)
+	LOOP
+		UPDATE LG.AUTH_ACCOUNT d SET \"LEVEL\" = i.NEW_LEVEL, SUBORDINATES = i.NEW_SUBORDINATES, PARENT_ID = i.NEW_PARENT_ID, PARENT_NAME = i.NEW_PARENT_NAME
+		WHERE d.PLATFORM_ID = i.PLATFORM_ID AND d.ID = i.ID;
+	END LOOP;
+END;
+
+--执行update 0612新增
+BEGIN
+	FOR i IN (
+		SELECT r.ID, r.ACCOUNT_ID, a.ACCOUNT_ID_PATH FROM RELAY_BET_TOTAL_REPORT r
+		LEFT JOIN AUTH_ACCOUNT a ON r.ACCOUNT_ID = a.ID 
+		WHERE 1=1
+			AND a.ID IS NOT NULL AND r.ACCOUNT_ID_PATH != a.ACCOUNT_ID_PATH 
+	)
+	LOOP
+		UPDATE LG.RELAY_BET_TOTAL_REPORT r SET ACCOUNT_ID_PATH = i.ACCOUNT_ID_PATH
+		WHERE r.ACCOUNT_ID = i.ACCOUNT_ID AND r.ID = i.ID;
+	END LOOP;
+END;
+
+--主库檢查1
+WITH c AS (
+	SELECT ID, LOGIN_NAME, ACCOUNT_ID_PATH, ACCOUNT_NAME_PATH, PLATFORM_ID FROM LG.AUTH_ACCOUNT
+	WHERE PLATFORM_ID = (SELECT ID FROM LG.PUB_SITE WHERE SITE_PATH = '$site') AND LOGIN_NAME = '$account1' --上级账号
+)
+SELECT a.* FROM LG.AUTH_ACCOUNT a
+LEFT JOIN c ON c.PLATFORM_ID = a.PLATFORM_ID
+WHERE a.PLATFORM_ID = c.PLATFORM_ID
+	AND (
+		a.ACCOUNT_NAME_PATH NOT LIKE c.ACCOUNT_NAME_PATH ||'%' OR a.ACCOUNT_ID_PATH NOT LIKE c.ACCOUNT_ID_PATH || '%'
+		OR ((a.PARENT_ID != c.ID OR a.PARENT_NAME != c.LOGIN_NAME)
+			AND a.LOGIN_NAME IN (
+				$account2_batch
+			) --直属下级账号
+		)
+	)
+CONNECT BY a.PARENT_ID = PRIOR a.ID
+START WITH a.LOGIN_NAME IN (
+	$account2_batch
+) --直属下级账号
+;
+
+--主库檢查2
+WITH c AS (
+	SELECT 
+		a.PLATFORM_ID, a.ID, a.LOGIN_NAME, a.\"LEVEL\", b.NEW_LEVEL, a.ACCOUNT_ID_PATH, a.ACCOUNT_NAME_PATH, a.PARENT_ID, a.PARENT_NAME,
+		CASE b.NEW_LEVEL
+			WHEN 0 THEN to_number(NULL)
+			WHEN 1 THEN to_number(SUBSTR(a.ACCOUNT_ID_PATH, 1, INSTR(ACCOUNT_ID_PATH, '/', 1, b.NEW_LEVEL) -1))
+			ELSE to_number(SUBSTR(a.ACCOUNT_ID_PATH, INSTR(ACCOUNT_ID_PATH, '/', 1, b.NEW_LEVEL-1) +1, INSTR(ACCOUNT_ID_PATH, '/', 1, b.NEW_LEVEL) - INSTR(ACCOUNT_ID_PATH, '/', 1, b.NEW_LEVEL-1) -1))
+		END AS NEW_PARENT_ID,
+		CASE b.NEW_LEVEL
+			WHEN 0 THEN '厅主'
+			WHEN 1 THEN SUBSTR(a.ACCOUNT_NAME_PATH, 1, INSTR(ACCOUNT_NAME_PATH, '/', 1, b.NEW_LEVEL) -1)
+			ELSE SUBSTR(a.ACCOUNT_NAME_PATH, INSTR(ACCOUNT_NAME_PATH, '/', 1, b.NEW_LEVEL-1) +1, INSTR(ACCOUNT_NAME_PATH, '/', 1, b.NEW_LEVEL) - INSTR(ACCOUNT_NAME_PATH, '/', 1, b.NEW_LEVEL-1) -1)
+		END AS NEW_PARENT_NAME
+	FROM LG.AUTH_ACCOUNT a
+	LEFT JOIN (
+		SELECT ID, REGEXP_COUNT(ACCOUNT_NAME_PATH , '/') -1 AS NEW_LEVEL FROM LG.AUTH_ACCOUNT 
+		WHERE 1=1 AND PLATFORM_ID = (SELECT ID FROM LG.PUB_SITE WHERE SITE_PATH = '$site')
+	) b ON b.ID = a.ID
+	WHERE 1=1 AND PLATFORM_ID = (SELECT ID FROM LG.PUB_SITE WHERE SITE_PATH = '$site')
+)
+SELECT a.ID, a.LOGIN_NAME, a.\"LEVEL\", c.NEW_LEVEL, a.SUBORDINATES, b.NEW_SUBORDINATES, a.ACCOUNT_ID_PATH, a.ACCOUNT_NAME_PATH
+	, a.PARENT_ID, c.NEW_PARENT_ID, a.PARENT_NAME, c.NEW_PARENT_NAME
+	, CASE 
+		WHEN a.\"LEVEL\" != b.NEW_LEVEL THEN
+			CASE 
+				WHEN a.SUBORDINATES != b.NEW_SUBORDINATES THEN
+					CASE
+						WHEN a.PARENT_ID != c.NEW_PARENT_ID THEN
+							CASE 
+								WHEN a.PARENT_NAME != c.NEW_PARENT_NAME THEN '层级错误 且 下级人数错误 且 上级ID错误 且 上级账号错误'
+								ELSE '层级错误 且 下级人数错误 且 上级ID错误'
+							END
+						ELSE --上级ID正确
+							CASE 
+								WHEN a.PARENT_NAME != c.NEW_PARENT_NAME THEN '层级错误 且 下级人数错误 且 上级账号错误'
+								ELSE '层级错误 且 下级人数错误'
+							END
+					END
+				ELSE --下级人数正确
+					CASE
+						WHEN a.PARENT_ID != c.NEW_PARENT_ID THEN
+							CASE 
+								WHEN a.PARENT_NAME != c.NEW_PARENT_NAME THEN '层级错误 且 上级ID错误 且 上级账号错误'
+								ELSE '层级错误 且 上级ID错误'
+							END
+						ELSE --上级ID正确
+							CASE 
+								WHEN a.PARENT_NAME != c.NEW_PARENT_NAME THEN '层级错误 且 上级账号错误'
+								ELSE '层级错误'
+							END
+					END
+			END
+		ELSE --层级正确
+			CASE 
+				WHEN a.SUBORDINATES != b.NEW_SUBORDINATES THEN
+					CASE
+						WHEN a.PARENT_ID != c.NEW_PARENT_ID THEN
+							CASE 
+								WHEN a.PARENT_NAME != c.NEW_PARENT_NAME THEN '下级人数错误 且 上级ID错误 且 上级账号错误'
+								ELSE '下级人数错误 且 上级ID错误'
+							END
+						ELSE --上级ID正确
+							CASE 
+								WHEN a.PARENT_NAME != c.NEW_PARENT_NAME THEN '下级人数错误 且 上级账号错误'
+								ELSE '下级人数错误'
+							END
+					END
+				ELSE --下级人数正确
+					CASE
+						WHEN a.PARENT_ID != c.NEW_PARENT_ID THEN
+							CASE 
+								WHEN a.PARENT_NAME != c.NEW_PARENT_NAME THEN '上级ID错误 且 上级账号错误'
+								ELSE '上级ID错误'
+							END
+						ELSE --上级ID正确
+							CASE 
+								WHEN a.PARENT_NAME != c.NEW_PARENT_NAME THEN '上级账号错误'
+								ELSE '都正确，不应该出现'
+							END
+					END
+			END
+	END AS \"错误原因\"
+FROM LG.AUTH_ACCOUNT a 
+LEFT JOIN (
+	SELECT a.ID, a.LOGIN_NAME, c.NEW_LEVEL, count(1) -1 AS NEW_SUBORDINATES FROM c
+	LEFT JOIN LG.AUTH_ACCOUNT a ON a.ID = c.ID
+	CONNECT BY c.ID = PRIOR c.NEW_PARENT_ID START WITH c.ID = a.ID --特殊处理，与一般上下级关联不同
+	GROUP BY a.ID, a.LOGIN_NAME, c.NEW_LEVEL
+) b ON b.ID = a.ID 
+LEFT JOIN c ON c.ID = a.ID
+WHERE 1=1
+	AND a.PLATFORM_ID = (SELECT ID FROM LG.PUB_SITE WHERE SITE_PATH = '$site')
+	AND (a.\"LEVEL\" != b.NEW_LEVEL OR a.SUBORDINATES != b.NEW_SUBORDINATES OR a.PARENT_ID != c.NEW_PARENT_ID OR a.PARENT_NAME != c.NEW_PARENT_NAME)
+;
+
+--主库檢查3
+SELECT ACCOUNT_ID FROM (
+	SELECT count(1) AS \"denum\" , ACCOUNT_ID FROM (
+		SELECT count(1) , r.ACCOUNT_ID ,r.ACCOUNT_PATH
+		FROM LG.BET_GPCP_CLEARING_RECORD_TEMP r
+		WHERE r.clearing_date > trunc(sysdate)
+		GROUP BY r.ACCOUNT_ID,r.ACCOUNT_PATH
+	) GROUP BY ACCOUNT_ID
+) dd WHERE dd.\"denum\" > 1;
+
+"
+
+# 產出SQL檔案
+filename="$account1.txt"
+filepath="/ORA/script/agentswitch/$filename"
+echo "$sql" > "$filepath"
+
+curl -s -X POST "https://api.telegram.org/bot5434896827:AAFBAoEWw9UnMmde1FUV75MDUNfZj8e5v0k/sendDocument" \
+  -F chat_id=-608975891 \
+  -F document=@"$filepath" \
+  -F caption="$account1" 
+
+
+# Cleanup file
+rm "$filename"
+
+# 產出轉移代理線檔案
+filename2="$site.txt"
+filepath2="/ORA/script/agentswitch/$filename2"
+
+for account in "${account2[@]}"
+do
+    text="localhost:19999/generaterAgentSql/$site/$account1/$account"
+    echo "$text" >> "$filename2"
+done
+curl -s -X POST "https://api.telegram.org/bot5434896827:AAFBAoEWw9UnMmde1FUV75MDUNfZj8e5v0k/sendDocument" \
+  -F chat_id=-608975891 \
+  -F document=@"$filepath2" \
+  -F caption="$site" 
+# 刪除檔案
+rm "$filename2"
