@@ -1,64 +1,58 @@
----投注
-SELECT a.id,
-       '投注-RELAY_BET' AS error
-  FROM lg.RELAY_BET a, lg.auth_account b
- WHERE     a.clearing_Date >= SYSDATE - 3
-       AND A.ACCOUNT_ID = b.id
-       AND a.ACCOUNT_PATH != B.ACCOUNT_ID_PATH
+SELECT '投注RELAY_BET->錯誤筆數' || COUNT(1)
+FROM lg.RELAY_BET a,
+    lg.auth_account b
+WHERE a.clearing_Date >= SYSDATE - 3
+    AND A.ACCOUNT_ID = b.id
+    AND a.ACCOUNT_PATH != B.ACCOUNT_ID_PATH
+HAVING COUNT(1) > 0
 UNION ALL
---天能
-SELECT a.id,
-       '天能-RELAY_TNBET' AS error
+SELECT '天能RELAY_TNBET->錯誤筆數' || COUNT(1)
   FROM lg.RELAY_TNBET a, lg.auth_account b
  WHERE     a.clearing_date >= SYSDATE - 3
        AND A.ACCOUNT_ID = b.id
        AND a.account_path != B.ACCOUNT_ID_PATH
+HAVING COUNT(1) > 0
 UNION ALL
--- 返點
-SELECT a.id,
-      '返點-RELAY_REBATE' AS error
+SELECT '返點RELAY_REBATE->錯誤筆數' || COUNT(1)
   FROM lg.RELAY_REBATE a, lg.auth_account b
  WHERE     a.flow_record_date >= SYSDATE - 3
        AND A.ACCOUNT_ID = b.id
        AND a.account_path != B.ACCOUNT_ID_PATH
+HAVING COUNT(1) > 0
 UNION ALL
---充值
-SELECT a.id,
-      '充值-RELAY_RECHARGE' AS error
+SELECT '充值RELAY_RECHARGE->錯誤筆數' || COUNT(1)
   FROM lg.RELAY_RECHARGE a, lg.auth_account b
  WHERE     a.DEPOSIT_DATE >= SYSDATE - 3
        AND A.ACCOUNT_ID = b.id
        AND a.ACCOUNT_PATH != B.ACCOUNT_ID_PATH
+HAVING COUNT(1) > 0
 UNION ALL
---其他
-SELECT a.id,
-      '其他-RELAY_OTHER' AS error
+SELECT '其他RELAY_OTHER->錯誤筆數' || COUNT(1)
   FROM lg.RELAY_OTHER a, lg.auth_account b
  WHERE     a.FLOW_RECORD_DATE >= SYSDATE - 3
        AND A.ACCOUNT_ID = b.id
        AND a.ACCOUNT_PATH != B.ACCOUNT_ID_PATH
+HAVING COUNT(1) > 0
 UNION ALL
---對戰
-SELECT a.id,
-      '對戰-RELAY_BET_BATTLE' AS error
+SELECT '對戰RELAY_BET_BATTLE->錯誤筆數' || COUNT(1)
   FROM lg.RELAY_BET_BATTLE a, lg.auth_account b
  WHERE     a.CREATE_DATE >= SYSDATE - 3
        AND A.ACCOUNT_ID = b.id
        AND a.ACCOUNT_ID_PATH != B.ACCOUNT_ID_PATH
+HAVING COUNT(1) > 0
 UNION ALL
----活動
-SELECT a.id,
-      '活動-RELAY_ACTIVITY' AS error
+SELECT '活動RELAY_ACTIVITY->錯誤筆數' || COUNT(1)
   FROM lg.RELAY_ACTIVITY a, lg.auth_account b
  WHERE     a.flow_record_date >= SYSDATE - 3
        AND A.ACCOUNT_ID = b.id
        AND a.account_path != B.ACCOUNT_ID_PATH
+HAVING COUNT(1) > 0
 UNION ALL
 ---- 未結的PATH 跟現在的PATH 不同的數據
-SELECT a.id,
-      '未結-BET_NOCLEARING_ALL' AS error
+SELECT '未結-BET_NOCLEARING_ALL->錯誤筆數' || COUNT(1)
   FROM lg.BET_NOCLEARING_ALL a, lg.auth_account b
  WHERE     a.create_Date >= SYSDATE - 1
        AND A.ACCOUNT_ID = b.id
        AND a.account_path != B.ACCOUNT_ID_PATH
        and a.status = 1
+HAVING COUNT(1) > 0;
