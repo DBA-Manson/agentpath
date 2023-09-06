@@ -1,3 +1,25 @@
+spool /ORA/script/relay_check.log
+
+set linesize 6000
+set feedback off
+set echo off
+set trimout off
+set trimspool off
+set termout off
+set verify off
+set HEA off
+set pagesize 0
+set trimspool on
+set head off
+set headsep off
+set newp none
+set linesize 32767
+set pagesize 50000
+set sqlblanklines OFF
+set trimspool ON
+set termout off
+set feedback off
+
 SELECT '投注RELAY_BET->錯誤筆數' || COUNT(1)
 FROM lg.RELAY_BET a,
     lg.auth_account b
@@ -56,3 +78,8 @@ SELECT '未結-BET_NOCLEARING_ALL->錯誤筆數' || COUNT(1)
        AND a.account_path != B.ACCOUNT_ID_PATH
        and a.status = 1
 HAVING COUNT(1) > 0;
+
+
+spool off
+
+exit;
