@@ -1,5 +1,5 @@
 #!/bin/bash
-
+###此為檢查報表中繼層跟未結算的view
 export TMP=/tmp
 export TMPDIR=$TMP
 export ORACLE_SID=LG1
